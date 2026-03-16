@@ -9,7 +9,7 @@
 #      ╚═╝    ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═════╝ 
 #                                                                                                    
 #                      --- OSRM REMOTE BUILD & DEPLOY ---
-#                     USA MLD BUILD - RESOURCE EDITION v2.1
+#                     USA MLD BUILD - OS-AWARE AGENT v2.3
 #      https://github.com/mejacobarussell/OSRM_low_resource_build_script
 # ==============================================================================
 
@@ -23,8 +23,17 @@ SELECTED_REMOTE=""
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
 
+# --- OS DETECTION ---
+get_os_name() {
+    if [ -f /etc/os-release ]; then
+        # Extracts the NAME field (e.g., "Unraid", "Ubuntu")
+        grep ^NAME /etc/os-release | cut -d'"' -f2 | awk '{print $1}'
+    else
+        echo "Linux-Generic"
+    fi
+}
+
 # --- FLAG PARSING ---
-# We parse flags BEFORE the config check so -c can change the target file
 while getopts "c:a" opt; do
   case $opt in
     c) CONFIG_FILE="$OPTARG" ;;
@@ -37,6 +46,13 @@ done
 if [[ ! -f "$CONFIG_FILE" ]]; then
     log "⚠️ Configuration file '$CONFIG_FILE' not found. Starting Setup Wizard..."
     echo "-------------------------------------------------------"
+    LOCAL_OS=$(get_os_name)
+    read -p "Enter Agent Name (e.g., Alpha-Server) [$LOCAL_OS]: " AGENT_NAME
+    AGENT_NAME=${AGENT_NAME:-$LOCAL_OS}
+    
+    # Combine User Name with detected OS
+    AGENT_ID="${AGENT_NAME}_(${LOCAL_OS})"
+    
     read -p "Remote SSH User [root]: " REMOTE_USER
     REMOTE_USER=${REMOTE_USER:-root}
     read -p "Remote Host IP: " REMOTE_HOST
@@ -48,7 +64,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "--- Resource Allocation ---"
     read -p "Remote CPU Cores to use [10]: " R_CPUS
     R_CPUS=${R_CPUS:-10}
-    read -p "Remote RAM Limit (e.g. 6g) [6g]: " R_RAM
+    read -p "Remote RAM Limit [6g]: " R_RAM
     R_RAM=${R_RAM:-6g}
     read -p "STXXL Disk Cache Size (MB) [128000]: " R_STXXL
     R_STXXL=${R_STXXL:-128000}
@@ -62,6 +78,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 
     cat << EOF > "$CONFIG_FILE"
 # --- YourDitchDoc Remote Config ---
+AGENT_ID="$AGENT_ID"
 REMOTE_USER="$REMOTE_USER"
 REMOTE_HOSTS=("$REMOTE_HOST")
 REMOTE_DIR="$REMOTE_DIR"
@@ -76,20 +93,18 @@ PUSHOVER_USER_KEY="$P_USER"
 PUSHOVER_APP_TOKEN="$P_TOKEN"
 PUSHOVER_PRIORITY=${P_PRIO:-0}
 EOF
-    log "✅ Configuration saved to $CONFIG_FILE"
+    log "✅ Configuration saved for Agent: $AGENT_ID"
 fi
 
 # --- LOAD SETTINGS ---
 source "$CONFIG_FILE"
-
-# Safety check for the array variable
 if [[ -z "${REMOTE_HOSTS+x}" ]]; then REMOTE_HOSTS=(); fi
 
 # --- PUSHOVER FUNCTION ---
 send_push() {
     if [[ "${PUSHOVER_ENABLE:-false}" == "true" ]]; then
         curl -s --form-string "token=$PUSHOVER_APP_TOKEN" --form-string "user=$PUSHOVER_USER_KEY" \
-        --form-string "message=$1" --form-string "title=YourDitchDoc OSRM" \
+        --form-string "message=[$AGENT_ID] $1" --form-string "title=YourDitchDoc OSRM" \
         --form-string "priority=$PUSHOVER_PRIORITY" https://api.pushover.net/1/messages.json > /dev/null
     fi
 }
@@ -113,13 +128,14 @@ select choice in "${CONTAINERS[@]}" "Cancel"; do
 done
 
 # --- 3. REMOTE BUILD ---
-log "Connecting to $SELECTED_REMOTE using config: $CONFIG_FILE"
-send_push "🚀 Remote Build Starting on $SELECTED_REMOTE"
+log "Agent $AGENT_ID connecting to $SELECTED_REMOTE..."
+send_push "🚀 Remote Build Starting"
 
 ssh "$REMOTE_USER@$SELECTED_REMOTE" << REMOTE_CMD
     mkdir -p "$REMOTE_DIR"
     cd "$REMOTE_DIR"
     
+    echo "[REMOTE] Identified Agent: $AGENT_ID"
     if [ ! -f "us-latest.osm.pbf" ]; then
         echo "[REMOTE] ⚠️ us-latest.osm.pbf missing. Downloading..."
         wget https://download.geofabrik.de/north-america/us-latest.osm.pbf
@@ -142,19 +158,20 @@ REMOTE_CMD
 # --- 4. STOP, SYNC, START ---
 
 if [ "$AUTO_RUN" = false ]; then
-    read -p "⚠️ Build finished. Ready to STOP and SYNC? (y/n): " CONFIRM
+    echo " "
+    read -p "⚠️ Build finished. Agent $AGENT_ID ready to STOP and SYNC? (y/n): " CONFIRM
     [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && exit 0
 fi
 
-log "Stopping $OSRM_CONTAINER_NAME..."
+log "Agent $AGENT_ID: Stopping $OSRM_CONTAINER_NAME..."
 docker stop "$OSRM_CONTAINER_NAME"
 
-log "Syncing files..."
+log "Agent $AGENT_ID: Syncing files..."
 rsync -avz --delete --progress "$REMOTE_USER@$SELECTED_REMOTE:$REMOTE_DIR/" "$LOCAL_DIR/"
 
-log "Starting $OSRM_CONTAINER_NAME..."
+log "Agent $AGENT_ID: Starting $OSRM_CONTAINER_NAME..."
 docker start "$OSRM_CONTAINER_NAME"
 
 # --- 5. FINISH ---
-log "YourDitchDoc: Rescue Complete."
-send_push "✅ OSRM Updated! $OSRM_CONTAINER_NAME is back online using $CONFIG_FILE."
+log "YourDitchDoc: Agent $AGENT_ID Rescue Complete."
+send_push "✅ Map Update Complete! Local container is back online."
