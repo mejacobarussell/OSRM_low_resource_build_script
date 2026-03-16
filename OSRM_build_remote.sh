@@ -1,5 +1,5 @@
 #!/bin/bash
-# ==============================================================================
+# ======================================================================================================
 #  
 #   ██╗   ██╗ ██████╗ ██╗   ██╗██████╗ ██████╗ ██╗████████╗ ██████╗██╗  ██╗██████╗  ██████╗  ██████╗ 
 #   ╚██╗ ██╔╝██╔═══██╗██║   ██║██╔══██╗██╔══██╗██║╚══██╔══╝██╔════╝██║  ██║██╔══██╗██╔═══██╗██╔════╝ 
@@ -9,9 +9,9 @@
 #      ╚═╝    ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ ╚═════╝ 
 #                                                                                                    
 #                      --- OSRM REMOTE BUILD & DEPLOY ---
-#                     USA MLD BUILD - OS-AWARE AGENT v2.3
+#                     USA MLD BUILD - CONFIG SAFEGUARD v2.4
 #      https://github.com/mejacobarussell/OSRM_low_resource_build_script
-# ==============================================================================
+# =====================================================================================================
 
 set -uo pipefail
 
@@ -26,7 +26,6 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
 # --- OS DETECTION ---
 get_os_name() {
     if [ -f /etc/os-release ]; then
-        # Extracts the NAME field (e.g., "Unraid", "Ubuntu")
         grep ^NAME /etc/os-release | cut -d'"' -f2 | awk '{print $1}'
     else
         echo "Linux-Generic"
@@ -42,15 +41,26 @@ while getopts "c:a" opt; do
   esac
 done
 
-# --- CONFIGURATION WIZARD ---
+# --- CONFIGURATION LOGIC ---
+RUN_WIZARD=false
+
 if [[ ! -f "$CONFIG_FILE" ]]; then
-    log "⚠️ Configuration file '$CONFIG_FILE' not found. Starting Setup Wizard..."
+    RUN_WIZARD=true
+else
+    # Config exists, check if user wants to keep or overwrite
+    echo "⚙️  Configuration file '$CONFIG_FILE' already exists."
+    read -p "   Do you want to re-run the Setup Wizard to overwrite it? (y/n): " RECONFIRM
+    if [[ "$RECONFIRM" =~ ^[Yy]$ ]]; then
+        RUN_WIZARD=true
+    fi
+fi
+
+if [ "$RUN_WIZARD" = true ]; then
+    log "🚀 Starting Setup Wizard..."
     echo "-------------------------------------------------------"
     LOCAL_OS=$(get_os_name)
     read -p "Enter Agent Name (e.g., Alpha-Server) [$LOCAL_OS]: " AGENT_NAME
     AGENT_NAME=${AGENT_NAME:-$LOCAL_OS}
-    
-    # Combine User Name with detected OS
     AGENT_ID="${AGENT_NAME}_(${LOCAL_OS})"
     
     read -p "Remote SSH User [root]: " REMOTE_USER
@@ -93,7 +103,7 @@ PUSHOVER_USER_KEY="$P_USER"
 PUSHOVER_APP_TOKEN="$P_TOKEN"
 PUSHOVER_PRIORITY=${P_PRIO:-0}
 EOF
-    log "✅ Configuration saved for Agent: $AGENT_ID"
+    log "✅ Configuration saved to $CONFIG_FILE"
 fi
 
 # --- LOAD SETTINGS ---
@@ -135,7 +145,6 @@ ssh "$REMOTE_USER@$SELECTED_REMOTE" << REMOTE_CMD
     mkdir -p "$REMOTE_DIR"
     cd "$REMOTE_DIR"
     
-    echo "[REMOTE] Identified Agent: $AGENT_ID"
     if [ ! -f "us-latest.osm.pbf" ]; then
         echo "[REMOTE] ⚠️ us-latest.osm.pbf missing. Downloading..."
         wget https://download.geofabrik.de/north-america/us-latest.osm.pbf
@@ -166,7 +175,7 @@ fi
 log "Agent $AGENT_ID: Stopping $OSRM_CONTAINER_NAME..."
 docker stop "$OSRM_CONTAINER_NAME"
 
-log "Agent $AGENT_ID: Syncing files..."
+log "Agent $AGENT_ID: Syncing files from $SELECTED_REMOTE..."
 rsync -avz --delete --progress "$REMOTE_USER@$SELECTED_REMOTE:$REMOTE_DIR/" "$LOCAL_DIR/"
 
 log "Agent $AGENT_ID: Starting $OSRM_CONTAINER_NAME..."
