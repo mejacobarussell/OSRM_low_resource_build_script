@@ -16,18 +16,28 @@ wget -O OSRM_build_remote.sh [https://raw.githubusercontent.com/mejacobarussell/
 🔑 SSH Setup (Passwordless Access)To allow the script to work automatically, your Unraid server must be able to talk to the Build Server without a password.
 
 Generate SSH Keys on Unraid 
-Open the Unraid Terminal and run: ```hssh-keygen -t rsa -b 4096```
+Open the Unraid Terminal and run:
+```bash 
+ssh-keygen -t rsa -b 4096
+```
 Press Enter for all prompts (leave passphrase empty)
 
  Copy the Key to the Build ServerReplace root and 192.168.x.x with your build server's details:
-```ssh-copy-id root@192.168.x.x```
-
-Verification: Type ```ssh root@192.168.x.x``` 
+```bash
+ssh-copy-id root@192.168.x.x
+```
+Verification: Type 
+```bash
+ssh root@192.168.x.x
+``` 
 If you log in without a password prompt, you're ready!
 
 🚀 UsageFirst Run (Setup Wizard)Simply run the script to start the 
 Guided Setup: 
-```./OSRM_build_remote.sh -c```
+
+```bash
+./OSRM_build_remote.sh -c
+```
 
 The script will detect your OS (Unraid), ask for your remote server details, resource limits (RAM/Cores), and Pushover credentials.
 
